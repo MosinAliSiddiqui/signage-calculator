@@ -255,6 +255,15 @@
             <div class="col-12 small text-muted">Height of the whole text. The width is worked out from the font.</div>
           </div>
 
+          <div class="small fw-bold text-uppercase text-muted mb-1">How it's made</div>
+          <div class="btn-group btn-group-sm w-100 mb-1" role="group" aria-label="Layout">
+            <input type="radio" class="btn-check" name="tp-layout" id="tp-layout-nest" checked>
+            <label class="btn btn-outline-dark" for="tp-layout-nest"><i class="bi bi-scissors"></i> Cut letters</label>
+            <input type="radio" class="btn-check" name="tp-layout" id="tp-layout-panel">
+            <label class="btn btn-outline-dark" for="tp-layout-panel"><i class="bi bi-layout-three-columns"></i> Sign panel</label>
+          </div>
+          <div class="small text-muted mb-3" id="tp-layout-help"></div>
+
           <div class="small fw-bold text-uppercase text-muted mb-1">Sheet / item size</div>
           <div class="row g-2 mb-2">
             <div class="col-6">
@@ -269,9 +278,13 @@
               <label class="form-label small mb-0" for="tp-pad">Padding from edges <span class="unit-label">mm</span></label>
               <input type="number" class="form-control form-control-sm" id="tp-pad" min="0" step="any" value="50">
             </div>
-            <div class="col-6 d-flex flex-column justify-content-end">
+            <div class="col-6" id="tp-space-wrap">
+              <label class="form-label small mb-0" for="tp-space">Gap between letters <span class="unit-label">mm</span></label>
+              <input type="number" class="form-control form-control-sm" id="tp-space" min="0" step="any" value="20">
+            </div>
+            <div class="col-12 d-flex flex-wrap gap-3">
               <div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="tp-rotate" checked><label class="form-check-label small" for="tp-rotate">Allow rotating sheet</label></div>
-              <div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="tp-words" checked><label class="form-check-label small" for="tp-words">Keep words together</label></div>
+              <div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="tp-avoid" checked><label class="form-check-label small" for="tp-avoid">Keep joins off letters</label></div>
             </div>
           </div>
 
@@ -288,7 +301,7 @@
         <div class="col-lg-8">
           <div class="row g-2 mb-3" id="tp-stats"></div>
           <div class="alert alert-warning py-2 small d-none" id="tp-warn"></div>
-          <div class="small fw-bold text-uppercase text-muted mb-1">Full text &mdash; coloured boxes show which sheet each part goes on</div>
+          <div class="small fw-bold text-uppercase text-muted mb-1"><span id="tp-ov-caption">Finished sign</span></div>
           <div class="tp-canvas mb-3" id="tp-overview"></div>
           <div class="small fw-bold text-uppercase text-muted mb-1">Sheet by sheet <span class="fw-normal text-lowercase">(dashed line = padding)</span></div>
           <div class="tp-sheet-grid" id="tp-sheets"></div>
@@ -1032,7 +1045,7 @@
   // =====================================================================
   // Text layout planner
   // =====================================================================
-  const TP_FIELDS = ['text', 'font', 'bold', 'th', 'gap', 'sh', 'sw', 'pad', 'rotate', 'words', 'mat'];
+  const TP_FIELDS = ['text', 'font', 'bold', 'th', 'gap', 'sh', 'sw', 'pad', 'space', 'rotate', 'avoid', 'mat'];
   const TP_COLORS = ['#0d6efd', '#f57c00', '#198754', '#8e44ad', '#d63384', '#0dcaf0', '#6f42c1', '#fd7e14'];
   const EPS = 1e-6;
   const measureCtx = document.createElement('canvas').getContext('2d');
@@ -1042,6 +1055,7 @@
   function readPlanner() {
     const p = {};
     TP_FIELDS.forEach(k => { const el = $('#tp-' + k); p[k] = el.type === 'checkbox' ? el.checked : el.value; });
+    p.layout = $('#tp-layout-panel').checked ? 'panel' : 'nest';
     return p;
   }
   function applyPlanner(p) {
@@ -1050,70 +1064,57 @@
       if (p[k] === undefined) return;
       if (el.type === 'checkbox') el.checked = !!p[k]; else el.value = p[k];
     });
+    $('#tp-layout-panel').checked = p.layout === 'panel';
+    $('#tp-layout-nest').checked = p.layout !== 'panel';
   }
 
-  // Split one row of text into chunks that fit the usable sheet width (never cutting a letter)
-  function chunkRow(row, uw, keepWords) {
-    const g = row.glyphs, n = g.length, chunks = [];
-    let i = 0;
-    while (i < n) {
-      while (i < n && g[i].c === ' ') i++;
-      if (i >= n) break;
-      const x0 = g[i].x0;
-      if (g[i].x1 - x0 > uw + EPS) return null;              // single letter wider than the sheet
-      let end = i;
-      for (let j = i + 1; j < n && g[j].x1 - x0 <= uw + EPS; j++) end = j;
-      if (keepWords && end < n - 1 && g[end + 1].c !== ' ' && g[end].c !== ' ') {
-        let k = end;
-        while (k > i && g[k].c !== ' ') k--;
-        if (k > i) end = k - 1;                                // break at the last space instead
-      }
-      while (end > i && g[end].c === ' ') end--;
-      chunks.push({ start: i, end, x0, x1: g[end].x1 });
-      i = end + 1;
-    }
-    return chunks;
-  }
+  // Sheets are butted edge to edge like panels; the text runs across them with padding all round.
+  // Within any spare room the text is nudged so the joins between sheets miss the letters.
+  function gridPlan(L, SH, SW, pad, avoid) {
+    const needW = L.inkW + 2 * pad, needH = L.blockH + 2 * pad;
+    const cols = Math.max(1, Math.ceil(needW / SW - EPS));
+    const rows = Math.max(1, Math.ceil(needH / SH - EPS));
+    const totalW = cols * SW, totalH = rows * SH;
 
-  // Lay the text out on sheets of sheetH × sheetW
-  function packSheets(layout, sheetH, sheetW, pad, keepWords) {
-    const uw = sheetW - 2 * pad, uh = sheetH - 2 * pad;
-    if (uw <= 0 || uh <= 0) return null;
-    const { rows, lineH } = layout;
-    const sheets = [];
-    let tiled = false, r = 0;
-    while (r < rows.length) {
-      const first = chunkRow(rows[r], uw, keepWords);
-      if (lineH > uh + EPS || !first) {
-        // Letters too big for one sheet: tile the row and join on the wall
-        tiled = true;
-        const row = rows[r], gs = row.glyphs.filter(x => x.c !== ' ');
-        const x0 = gs[0].x0, x1 = gs[gs.length - 1].x1;
-        for (let ty = row.y; ty < row.y + lineH - EPS; ty += uh)
-          for (let tx = x0; tx < x1 - EPS; tx += uw)
-            sheets.push({ tile: { row: r, x0: tx, x1: Math.min(tx + uw, x1), y0: ty, y1: Math.min(ty + uh, row.y + lineH) }, parts: [] });
-        r++;
-        continue;
+    // Letters crossed by a vertical join for a given left edge of the text (ink)
+    const vCuts = (left) => {
+      const dx = left - L.inkX0, out = [];
+      for (let k = 1; k < cols; k++) {
+        const s = k * SW;
+        L.rows.forEach((row, r) => row.glyphs.forEach((g, gi) => {
+          if (g.c.trim() && s > g.x0 + dx + EPS && s < g.x1 - EPS + dx) out.push([r, gi]);
+        }));
       }
-      // Stack as many rows on the same sheets as fit vertically
-      const sets = [first];
-      let last = r;
-      while (last + 1 < rows.length && rows[last + 1].y + lineH - rows[r].y <= uh + EPS) {
-        const c = chunkRow(rows[last + 1], uw, keepWords);
-        if (!c) break;
-        sets.push(c);
-        last++;
-      }
-      const count = Math.max(...sets.map(s => s.length));
-      for (let s = 0; s < count; s++) {
-        sheets.push({
-          band: { y0: rows[r].y, y1: rows[last].y + lineH },
-          parts: sets.map((cs, idx) => cs[s] && { row: r + idx, ...cs[s] }).filter(Boolean),
+      return out;
+    };
+    // Rows crossed by a horizontal join for a given top edge of the text
+    const hCuts = (top) => {
+      const out = [];
+      for (let k = 1; k < rows; k++) {
+        const s = k * SH;
+        L.rows.forEach((row, r) => {
+          if (s > top + row.y + EPS && s < top + row.y + L.lineH - EPS)
+            row.glyphs.forEach((g, gi) => { if (g.c.trim()) out.push([r, gi]); });
         });
       }
-      r = last + 1;
-    }
-    return { sheets, uw, uh, sheetH, sheetW, tiled };
+      return out;
+    };
+    const best = (lo, hi, cutsAt) => {
+      const mid = (lo + hi) / 2;
+      let pos = mid, cuts = cutsAt(mid).length;
+      if (avoid && hi > lo + EPS) {
+        for (let i = 0; i <= 400; i++) {
+          const x = lo + (hi - lo) * i / 400, c = cutsAt(x).length;
+          if (c < cuts || (c === cuts && Math.abs(x - mid) < Math.abs(pos - mid))) { pos = x; cuts = c; }
+        }
+      }
+      return pos;
+    };
+    const left = best(pad, totalW - pad - L.inkW, vCuts);
+    const top = best(pad, totalH - pad - L.blockH, hCuts);
+    const cutKeys = new Set([...vCuts(left), ...hCuts(top)].map(([r, g]) => r + ':' + g));
+    return { cols, rows, count: cols * rows, sheetH: SH, sheetW: SW, totalW, totalH,
+             dx: left - L.inkX0, dy: top, cutKeys, cuts: cutKeys.size };
   }
 
   function layoutText(p) {
@@ -1167,29 +1168,71 @@
     return { rows, lineH, gap, blockW, blockH, letterW, sx, sy, asc, fontFamily, fontWeight };
   }
 
-  function planText(p) {
-    const layout = layoutText(p);
-    if (layout.error) return layout;
-    const sh = num(p.sh), sw = num(p.sw), pad = num(p.pad);
-    if (!sh || !sw) return { error: 'Enter the sheet height and width.' };
-    const options = [[sh, sw]];
-    if (p.rotate && sh !== sw) options.push([sw, sh]);
-    let best = null;
-    options.forEach(([h, w], i) => {
-      const plan = packSheets(layout, h, w, pad, p.words);
-      if (!plan) return;
-      plan.rotated = i === 1;
-      // Never cutting letters beats fewer sheets; then fewer sheets wins
-      const better = !best ||
-        (best.tiled && !plan.tiled) ||
-        (best.tiled === plan.tiled && plan.sheets.length < best.sheets.length);
-      if (better) best = plan;
+  // Cut letters: nest every letter onto sheets in reading order, row after row (shelf packing)
+  function nestPlan(L, SH, SW, pad, space) {
+    const uw = SW - 2 * pad, uh = SH - 2 * pad;
+    if (uw <= 0 || uh <= 0) return null;
+    const items = [];
+    L.rows.forEach((row, r) => row.glyphs.forEach((g, gi) => {
+      if (g.c.trim()) items.push({ r, gi, c: g.c, w: g.x1 - g.x0, h: L.lineH });
+    }));
+    const tooBig = items.filter(it => it.w > uw + EPS || it.h > uh + EPS);
+    if (tooBig.length) return { tooBig, uw, uh };
+    const sheets = [];
+    let cur, x, y, shelfH;
+    const newSheet = () => { cur = { items: [] }; sheets.push(cur); x = 0; y = 0; shelfH = 0; };
+    newSheet();
+    items.forEach(it => {
+      if (x > 0 && x + it.w > uw + EPS) { x = 0; y += shelfH + space; shelfH = 0; }   // next row on this sheet
+      if (y + it.h > uh + EPS) newSheet();                                            // sheet full
+      cur.items.push({ ...it, x, y });
+      x += it.w + space;
+      shelfH = Math.max(shelfH, it.h);
     });
-    if (!best) return { error: 'Padding is too large for this sheet size.' };
-    return { layout, plan: best, pad };
+    return { sheets, count: sheets.length, sheetH: SH, sheetW: SW, uw, uh, letters: items.length };
   }
 
-  // SVG text for a run of characters from a row, placed with its top-left at (x, y)
+  function planText(p) {
+    const L = layoutText(p);
+    if (L.error) return L;
+    const sh = num(p.sh), sw = num(p.sw), pad = num(p.pad);
+    if (!sh || !sw) return { error: 'Enter the sheet height and width.' };
+    // Real ink extent of the text (italic letters lean past their normal width)
+    const ink = L.rows.flatMap(r => r.glyphs.filter(g => g.c.trim()));
+    L.inkX0 = Math.min(...ink.map(g => g.x0));
+    L.inkX1 = Math.max(...ink.map(g => g.x1));
+    L.inkW = L.inkX1 - L.inkX0;
+
+    const options = [[sh, sw]];
+    if (p.rotate && sh !== sw) options.push([sw, sh]);
+
+    if (p.layout !== 'panel') {
+      let best = null, big = null;
+      options.forEach(([H, W], i) => {
+        const plan = nestPlan(L, H, W, pad, num(p.space));
+        if (!plan) return;
+        if (plan.tooBig) { big = big || plan; return; }
+        plan.rotated = i === 1;
+        if (!best || plan.count < best.count) best = plan;
+      });
+      if (best) return { layout: L, plan: best, pad, mode: 'nest' };
+      if (big) {
+        const t = big.tooBig.reduce((a, b) => (b.w * b.h > a.w * a.h ? b : a));
+        return { error: `Letter "${t.c}" is ${Math.round(t.h)} × ${Math.round(t.w)} but a sheet only has ${Math.round(big.uh)} × ${Math.round(big.uw)} inside the padding. Use bigger sheets, smaller text, or the Sign panel layout.` };
+      }
+      return { error: 'Padding is too large for this sheet size.' };
+    }
+
+    let best = null;
+    options.forEach(([H, W], i) => {
+      const plan = gridPlan(L, H, W, pad, p.avoid);
+      plan.rotated = i === 1;
+      if (!best || plan.count < best.count || (plan.count === best.count && plan.cuts < best.cuts)) best = plan;
+    });
+    return { layout: L, plan: best, pad, mode: 'panel' };
+  }
+
+  // SVG text for a run of characters from a row, placed with its origin at (x, y)
   function svgText(L, str, x, y, extra = '') {
     return `<text x="0" y="${L.asc}" font-family="${esc(L.fontFamily)}" font-weight="${L.fontWeight}" font-size="${REF}" ` +
       `style="white-space:pre" fill="#111827" transform="translate(${x} ${y}) scale(${L.sx} ${L.sy})" ${extra}>${esc(str)}</text>`;
@@ -1199,6 +1242,13 @@
     const p = readPlanner();
     const u = $('#unit').value;
     $('#tp-bold').disabled = /Sofachrome/i.test(p.font);
+    const panel = p.layout === 'panel';
+    $('#tp-space-wrap').classList.toggle('d-none', panel);
+    $('#tp-avoid').closest('.form-check').classList.toggle('d-none', !panel);
+    $('#tp-ov-caption').textContent = panel ? 'Finished sign — sheets side by side, black lines are the joins' : 'Finished text — colour and number show which sheet each letter is cut from';
+    $('#tp-layout-help').textContent = panel
+      ? 'Sheets butted side by side to make one board; the text runs across the joins.'
+      : 'Each letter is cut out separately; letters are nested onto as few sheets as possible.';
     const res = planText(p);
     const statsEl = $('#tp-stats'), warnEl = $('#tp-warn');
     lastPlan = null;
@@ -1212,87 +1262,154 @@
       $('#tp-add').disabled = true;
       return;
     }
-    const { layout: L, plan, pad } = res;
-    lastPlan = { ...plan, text: p.text, mat: p.mat };
+    const { layout: L, plan: P, pad } = res;
+    lastPlan = { ...P, text: p.text, mat: p.mat };
     $('#tp-add').disabled = false;
-    const n = plan.sheets.length;
     const fmt = (v) => (Math.round(v * 10) / 10).toLocaleString('en-AU');
     const toM = UNIT_TO_M[u] || 0.001;
-    const sheetArea = plan.sheetH * plan.sheetW * toM * toM;
+    const SW = P.sheetW, SH = P.sheetH;
+    const unitSm = `<small class="fw-normal">${u}</small>`;
+    if (res.mode === 'nest') return renderNest(L, P, pad, u, fmt, unitSm, toM);
 
     // ---- numbers ----
-    const stat = (label, value, hl) =>
-      `<div class="col-6 col-md"><div class="tp-stat ${hl ? 'hl' : ''}"><div class="l">${label}</div><div class="v">${value}</div></div></div>`;
+    const stat = (label, value, cls = '') =>
+      `<div class="col-6 col-md"><div class="tp-stat ${cls}"><div class="l">${label}</div><div class="v">${value}</div></div></div>`;
     statsEl.innerHTML =
-      stat('Sheets needed', n, true) +
-      stat('Sheet used (H × W)', `${fmt(plan.sheetH)} × ${fmt(plan.sheetW)} <small class="fw-normal">${u}</small>`) +
-      stat('Usable inside padding', `${fmt(plan.uh)} × ${fmt(plan.uw)} <small class="fw-normal">${u}</small>`) +
-      stat('Row height × widest letter', `${fmt(L.lineH)} × ${fmt(L.letterW)} <small class="fw-normal">${u}</small>`) +
-      stat('Whole text (H × W)', `${fmt(L.blockH)} × ${fmt(L.blockW)} <small class="fw-normal">${u}</small>`) +
-      stat('Total sheet area', m2(n * sheetArea));
+      stat('Sheets needed', `${P.count} <small class="fw-normal">(${P.cols} across × ${P.rows} down)</small>`, 'hl') +
+      stat('Sheet used (H × W)', `${fmt(SH)} × ${fmt(SW)} ${unitSm}`) +
+      stat('Text size (H × W)', `${fmt(L.blockH)} × ${fmt(L.inkW)} ${unitSm}`) +
+      stat('Finished panel (H × W)', `${fmt(P.totalH)} × ${fmt(P.totalW)} ${unitSm}`) +
+      stat('Letters on a join', P.cuts, P.cuts ? 'text-bg-warning' : '') +
+      stat('Total sheet area', m2(P.count * SH * SW * toM * toM));
+
     const warns = [];
-    if (plan.rotated) warns.push('Sheet is rotated (height and width swapped) because it needs fewer sheets.');
-    if (plan.tiled) warns.push('Some letters are bigger than one sheet, so they are split across sheets and joined on install (seams shown in red).');
+    if (P.rotated) warns.push('Sheets are turned sideways (height and width swapped) because that needs fewer sheets.');
+    if (P.cuts) warns.push(`${P.cuts} letter(s) cross a join between sheets (outlined in red). Changing the text height, padding or sheet size slightly can move the joins into the gaps.`);
     warnEl.innerHTML = warns.join('<br>');
     warnEl.classList.toggle('d-none', !warns.length);
 
-    // ---- overview: full text with a coloured box per sheet part ----
-    const m = Math.max(pad, L.lineH * 0.15);
-    const label = Math.max(L.lineH * 0.22, 12);
-    let ov = `<svg viewBox="${-m} ${-m} ${L.blockW + 2 * m} ${L.blockH + 2 * m}" xmlns="http://www.w3.org/2000/svg">`;
-    ov += `<rect x="${-m}" y="${-m}" width="${L.blockW + 2 * m}" height="${L.blockH + 2 * m}" fill="#fff"/>`;
-    L.rows.forEach(row => { ov += svgText(L, row.line, row.offX, row.y); });
-    plan.sheets.forEach((s, i) => {
-      const c = TP_COLORS[i % TP_COLORS.length];
-      const boxes = s.tile ? [{ x0: s.tile.x0, x1: s.tile.x1, y0: s.tile.y0, y1: s.tile.y1 }]
-        : s.parts.map(pt => ({ x0: pt.x0, x1: pt.x1, y0: L.rows[pt.row].y, y1: L.rows[pt.row].y + L.lineH }));
-      boxes.forEach(b => {
-        const g = s.tile ? 0 : Math.min(pad, L.lineH * 0.08);
-        ov += `<rect x="${b.x0 - g}" y="${b.y0 - g}" width="${b.x1 - b.x0 + 2 * g}" height="${b.y1 - b.y0 + 2 * g}" rx="${g}" ` +
-          `fill="${c}" fill-opacity=".12" stroke="${s.tile ? '#dc3545' : c}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
-        ov += `<text x="${b.x0 - g + label * 0.3}" y="${b.y0 - g + label}" font-size="${label}" font-family="Arial" font-weight="bold" fill="${c}">${i + 1}</text>`;
-      });
-    });
-    ov += '</svg>';
-    $('#tp-overview').innerHTML = ov;
+    // ---- one scene: all sheets side by side, text across them ----
+    const label = Math.min(SW, SH) * 0.12;
+    let scene = '';
+    for (let r = 0; r < P.rows; r++) for (let c = 0; c < P.cols; c++) {
+      const i = r * P.cols + c, col = TP_COLORS[i % TP_COLORS.length];
+      scene += `<rect x="${c * SW}" y="${r * SH}" width="${SW}" height="${SH}" fill="${col}" fill-opacity=".07" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+      scene += `<text x="${c * SW + label * 0.35}" y="${r * SH + label}" font-size="${label}" font-family="Arial" font-weight="bold" fill="${col}" fill-opacity=".8">${i + 1}</text>`;
+    }
+    // padding line around the whole panel
+    scene += `<rect x="${pad}" y="${pad}" width="${P.totalW - 2 * pad}" height="${P.totalH - 2 * pad}" fill="none" stroke="#adb5bd" stroke-width="1" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>`;
+    L.rows.forEach(row => { scene += svgText(L, row.line, P.dx + row.offX, P.dy + row.y); });
+    // letters sitting on a join
+    L.rows.forEach((row, r) => row.glyphs.forEach((g, gi) => {
+      if (P.cutKeys.has(r + ':' + gi))
+        scene += `<rect x="${g.x0 + P.dx}" y="${row.y + P.dy}" width="${g.x1 - g.x0}" height="${L.lineH}" fill="#dc3545" fill-opacity=".12" stroke="#dc3545" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+    }));
+    // joins drawn on top so they're easy to see
+    for (let c = 1; c < P.cols; c++) scene += `<line x1="${c * SW}" y1="0" x2="${c * SW}" y2="${P.totalH}" stroke="#111827" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+    for (let r = 1; r < P.rows; r++) scene += `<line x1="0" y1="${r * SH}" x2="${P.totalW}" y2="${r * SH}" stroke="#111827" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
 
-    // ---- each sheet with letters placed inside the padding ----
-    const { sheetW: SW, sheetH: SH, uw, uh } = plan;
-    $('#tp-sheets').innerHTML = plan.sheets.map((s, i) => {
-      const c = TP_COLORS[i % TP_COLORS.length];
-      let body = '', desc = '';
-      if (s.tile) {
-        const t = s.tile, row = L.rows[t.row];
-        body = `<clipPath id="tpclip${i}"><rect x="${pad}" y="${pad}" width="${t.x1 - t.x0}" height="${t.y1 - t.y0}"/></clipPath>` +
-          `<g clip-path="url(#tpclip${i})">${svgText(L, row.line, pad - t.x0 + row.offX, pad - t.y0 + row.y)}</g>` +
-          `<rect x="${pad}" y="${pad}" width="${t.x1 - t.x0}" height="${t.y1 - t.y0}" fill="none" stroke="#dc3545" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
-        desc = `Part of “${esc(row.line)}” (${fmt(t.y1 - t.y0)} × ${fmt(t.x1 - t.x0)} ${u})`;
-      } else {
-        const bandH = s.band.y1 - s.band.y0;
-        const ty = pad + (uh - bandH) / 2 - s.band.y0;      // centre the rows vertically
-        s.parts.forEach(pt => {
-          const row = L.rows[pt.row];
-          body += svgText(L, row.chars.slice(pt.start, pt.end + 1).join(''), pad + (row.offX + row.xs[pt.start] * L.sx - pt.x0), ty + row.y);
+    const mg = Math.min(SW, SH) * 0.03;
+    $('#tp-overview').innerHTML =
+      `<svg viewBox="${-mg} ${-mg} ${P.totalW + 2 * mg} ${P.totalH + 2 * mg}" xmlns="http://www.w3.org/2000/svg">` +
+      `<rect x="${-mg}" y="${-mg}" width="${P.totalW + 2 * mg}" height="${P.totalH + 2 * mg}" fill="#fff"/>${scene}</svg>`;
+
+    // ---- each sheet: a window onto the same scene ----
+    const cards = [];
+    for (let r = 0; r < P.rows; r++) for (let c = 0; c < P.cols; c++) {
+      const i = r * P.cols + c, col = TP_COLORS[i % TP_COLORS.length];
+      const x0 = c * SW, x1 = x0 + SW, y0 = r * SH, y1 = y0 + SH;
+      const whole = [], part = [];
+      L.rows.forEach((row, ri) => {
+        const ry0 = row.y + P.dy, ry1 = ry0 + L.lineH;
+        if (ry1 <= y0 + EPS || ry0 >= y1 - EPS) return;
+        const rowCut = ry0 < y0 - EPS || ry1 > y1 + EPS;
+        row.glyphs.forEach(g => {
+          if (!g.c.trim()) return;
+          const gx0 = g.x0 + P.dx, gx1 = g.x1 + P.dx;
+          if (gx1 <= x0 + EPS || gx0 >= x1 - EPS) return;
+          (rowCut || gx0 < x0 - EPS || gx1 > x1 + EPS ? part : whole).push(g.c);
         });
-        desc = s.parts.map(pt => `“${esc(L.rows[pt.row].chars.slice(pt.start, pt.end + 1).join(''))}” ` +
-          `<span class="text-muted">${fmt(L.lineH)} × ${fmt(pt.x1 - pt.x0)}</span>`).join('<br>');
-      }
+      });
+      const desc = [whole.length ? `Letters: <strong>${esc(whole.join(''))}</strong>` : '',
+                    part.length ? `<span class="text-danger">Part of: ${esc(part.join(' '))}</span>` : '']
+        .filter(Boolean).join(' · ') || '<span class="text-muted">Blank (padding only)</span>';
+      cards.push(`<div class="tp-sheet">
+        <div class="d-flex justify-content-between small mb-1">
+          <span class="fw-bold" style="color:${col}">Sheet ${i + 1}</span>
+          <span class="text-muted">${fmt(SH)} × ${fmt(SW)} ${u}</span>
+        </div>
+        <svg viewBox="${x0} ${y0} ${SW} ${SH}" xmlns="http://www.w3.org/2000/svg">
+          <rect x="${x0}" y="${y0}" width="${SW}" height="${SH}" fill="#fff"/>${scene}
+        </svg>
+        <div class="small mt-1">${desc}</div>
+      </div>`);
+    }
+    $('#tp-sheets').innerHTML = cards.join('');
+    const aspect = SW / SH;
+    const minCard = Math.round(Math.min(320, Math.max(110, 220 * aspect)));
+    $('#tp-sheets').style.gridTemplateColumns = `repeat(auto-fill, minmax(${minCard}px, 1fr))`;
+  }
+
+  function renderNest(L, P, pad, u, fmt, unitSm, toM) {
+    const SW = P.sheetW, SH = P.sheetH;
+    const stat = (label, value, cls = '') =>
+      `<div class="col-6 col-md"><div class="tp-stat ${cls}"><div class="l">${label}</div><div class="v">${value}</div></div></div>`;
+    const perSheet = Math.max(...P.sheets.map(s => s.items.length));
+    const used = P.sheets.reduce((a, s) => a + s.items.reduce((b, it) => b + it.w * it.h, 0), 0);
+    $('#tp-stats').innerHTML =
+      stat('Sheets needed', P.count, 'hl') +
+      stat('Sheet used (H × W)', `${fmt(SH)} × ${fmt(SW)} ${unitSm}`) +
+      stat('Letters', `${P.letters} <small class="fw-normal">(up to ${perSheet} per sheet)</small>`) +
+      stat('Text size (H × W)', `${fmt(L.blockH)} × ${fmt(L.inkW)} ${unitSm}`) +
+      stat('Sheet used by letters', Math.round(100 * used / (P.count * SW * SH)) + '%') +
+      stat('Total sheet area', m2(P.count * SH * SW * toM * toM));
+    const warnEl = $('#tp-warn');
+    warnEl.innerHTML = P.rotated ? 'Sheets are turned sideways (height and width swapped) because that needs fewer sheets.' : '';
+    warnEl.classList.toggle('d-none', !P.rotated);
+
+    // Sheet number for every letter, to colour the finished text
+    const where = new Map();
+    P.sheets.forEach((s, si) => s.items.forEach(it => where.set(it.r + ':' + it.gi, si)));
+
+    // ---- finished text, each letter tinted with the colour of the sheet it's cut from ----
+    const mg = L.lineH * 0.25, lbl = L.lineH * 0.2;
+    let ov = `<svg viewBox="${L.inkX0 - mg} ${-mg - lbl} ${L.inkW + 2 * mg} ${L.blockH + 2 * mg + lbl}" xmlns="http://www.w3.org/2000/svg">` +
+      `<rect x="${L.inkX0 - mg}" y="${-mg - lbl}" width="${L.inkW + 2 * mg}" height="${L.blockH + 2 * mg + lbl}" fill="#fff"/>`;
+    L.rows.forEach((row, r) => row.glyphs.forEach((g, gi) => {
+      const si = where.get(r + ':' + gi);
+      if (si === undefined) return;
+      const col = TP_COLORS[si % TP_COLORS.length];
+      ov += `<rect x="${g.x0}" y="${row.y}" width="${g.x1 - g.x0}" height="${L.lineH}" fill="${col}" fill-opacity=".14" stroke="${col}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+      ov += `<text x="${g.x0}" y="${row.y - lbl * 0.25}" font-size="${lbl}" font-family="Arial" font-weight="bold" fill="${col}">${si + 1}</text>`;
+    }));
+    L.rows.forEach(row => { ov += svgText(L, row.line, row.offX, row.y); });
+    $('#tp-overview').innerHTML = ov + '</svg>';
+
+    // ---- each sheet with its letters nested inside the padding ----
+    $('#tp-sheets').innerHTML = P.sheets.map((s, si) => {
+      const col = TP_COLORS[si % TP_COLORS.length];
+      let body = '';
+      s.items.forEach(it => {
+        const row = L.rows[it.r], g = row.glyphs[it.gi];
+        const originX = row.offX + row.xs[it.gi] * L.sx;          // where the letter's drawing starts
+        const x = pad + it.x, y = pad + it.y;
+        body += `<rect x="${x}" y="${y}" width="${it.w}" height="${it.h}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+        body += svgText(L, it.c, x + (originX - g.x0), y);
+      });
       return `<div class="tp-sheet">
         <div class="d-flex justify-content-between small mb-1">
-          <span class="fw-bold" style="color:${c}">Sheet ${i + 1}</span>
+          <span class="fw-bold" style="color:${col}">Sheet ${si + 1}</span>
           <span class="text-muted">${fmt(SH)} × ${fmt(SW)} ${u}</span>
         </div>
         <svg viewBox="0 0 ${SW} ${SH}" xmlns="http://www.w3.org/2000/svg">
-          <rect x="0" y="0" width="${SW}" height="${SH}" fill="#fff" stroke="${c}" stroke-width="3" vector-effect="non-scaling-stroke"/>
-          <rect x="${pad}" y="${pad}" width="${uw}" height="${uh}" fill="${c}" fill-opacity=".05" stroke="#adb5bd" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>
+          <rect x="0" y="0" width="${SW}" height="${SH}" fill="#fff" stroke="${col}" stroke-width="3" vector-effect="non-scaling-stroke"/>
+          <rect x="${pad}" y="${pad}" width="${P.uw}" height="${P.uh}" fill="none" stroke="#adb5bd" stroke-width="1" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>
           ${body}
         </svg>
-        <div class="small mt-1">${desc}</div>
+        <div class="small mt-1">Letters: <strong>${esc(s.items.map(it => it.c).join(' '))}</strong> <span class="text-muted">(${s.items.length})</span></div>
       </div>`;
     }).join('');
-    // Sheets sit side by side like they'd go on the wall; tall narrow sheets get narrower cards
-    const aspect = SW / SH;
-    const minCard = Math.round(Math.min(320, Math.max(110, 220 * aspect)));
+    const minCard = Math.round(Math.min(320, Math.max(110, 220 * SW / SH)));
     $('#tp-sheets').style.gridTemplateColumns = `repeat(auto-fill, minmax(${minCard}px, 1fr))`;
   }
 
@@ -1301,7 +1418,7 @@
     const first = lastPlan.text.split('\n').map(s => s.trim()).filter(Boolean).join(' / ');
     const slot = addSlot({
       name: `Text: ${first}`,
-      qty: lastPlan.sheets.length,
+      qty: lastPlan.count,
       layers: [{ material: lastPlan.mat, h: String(lastPlan.sheetH), w: String(lastPlan.sheetW), cut: true }],
     });
     dirty = true;
@@ -1309,7 +1426,7 @@
     const modalEl = $('#plannerModal');
     modalEl.addEventListener('hidden.bs.modal', () => slot.scrollIntoView({ behavior: 'smooth', block: 'center' }), { once: true });
     bootstrap.Modal.getOrCreateInstance(modalEl).hide();
-    toast(`Added ${lastPlan.sheets.length} sheet(s) to the quote`);
+    toast(`Added ${lastPlan.count} sheet(s) to the quote`);
   });
 
   // Redraw when opened (unit or fonts may have changed meanwhile); close any side panel first
