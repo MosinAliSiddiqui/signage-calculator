@@ -57,6 +57,11 @@
 
     /* Summary */
     .sticky-summary { position: sticky; top: 1rem; }
+    @media (min-width: 992px) { .sticky-summary { max-height: calc(100vh - 2rem); overflow-y: auto; } }
+    .summary-lines { max-height: 22vh; overflow-y: auto; padding-right: .25rem; }
+    .fab-add { position: fixed; left: 16px; bottom: 16px; z-index: 1030; width: 56px; height: 56px; border-radius: 50%;
+               font-size: 1.6rem; box-shadow: 0 4px 14px rgba(0,0,0,.25); display: flex; align-items: center; justify-content: center; }
+    @media print { .fab-add { display: none !important; } }
     .total-hero { background: linear-gradient(135deg, #198754, #146c43); color: #fff; border-radius: .6rem; padding: 1rem; text-align: center; }
     .total-hero .amount { font-size: 2.1rem; font-weight: 800; line-height: 1.1; }
     .total-hero .label { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; opacity: .85; }
@@ -250,7 +255,8 @@
             <div class="amount money" id="heroTotal">$0.00</div>
             <div class="small opacity-75" id="heroArea">0.000 m² of material</div>
           </div>
-          <div id="summaryLines" class="small mb-3"></div>
+          <button class="btn btn-primary w-100 mb-3" id="addSlotSummary"><i class="bi bi-plus-lg"></i> Add slot</button>
+          <div id="summaryLines" class="small mb-3 summary-lines"></div>
           <table class="table table-sm mb-0">
             <thead><tr class="small text-muted"><th>Item</th><th class="text-end">Area</th><th class="text-end">Amount</th></tr></thead>
             <tbody>
@@ -463,6 +469,9 @@
     <div id="historyList" class="list-group"></div>
   </div>
 </div>
+
+<!-- ===== FLOATING ADD SLOT (tablets/phones, where the summary isn't beside the slots) ===== -->
+<button class="btn btn-primary fab-add d-lg-none" id="addSlotFab" title="Add slot" aria-label="Add slot"><i class="bi bi-plus-lg"></i></button>
 
 <!-- ===== TOAST ===== -->
 <div class="toast-container position-fixed bottom-0 end-0 p-3">
@@ -1522,6 +1531,8 @@
   }
   $('#addSlot').addEventListener('click', addSlotAndFocus);
   $('#addSlotBottom').addEventListener('click', addSlotAndFocus);
+  $('#addSlotSummary').addEventListener('click', addSlotAndFocus);
+  $('#addSlotFab').addEventListener('click', addSlotAndFocus);
 
   $('#resetPrices').addEventListener('click', () => {
     linkCutting.checked = true;
