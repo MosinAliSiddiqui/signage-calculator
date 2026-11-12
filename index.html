@@ -43,10 +43,13 @@
     .layer-row[data-material="banner"] { border-left-color: var(--c-banner) !important; }
     .layer-index { width: 2rem; height: 2rem; line-height: 2rem; text-align: center; border-radius: 50%; font-weight: 600; }
     .layer-custom { text-align: right; font-size: 1rem; }
-    .layer-custom::placeholder { color: #212529; opacity: .7; }
+    .layer-custom::placeholder, .layer-rate::placeholder { color: #212529; opacity: .7; }
+    .layer-rate { text-align: right; }
     .layer-row.is-custom { background-color: #fff9e6 !important; box-shadow: inset 0 0 0 1px #f3dc8f; }
-    .layer-row.is-custom .layer-custom { background: #fff3c4; border-color: #e6c24f; }
-    .layer-note { min-height: 1.1rem; color: #6c757d; font-size: .75rem; }
+    .layer-row.is-custom .layer-custom:not(:placeholder-shown), .layer-row.is-custom .layer-rate:not(:placeholder-shown) { background: #fff3c4; border-color: #e6c24f; }
+    .layer-note { color: #6c757d; font-size: .75rem; }
+    .layer-mat-col { min-width: 170px; }
+    .layer-pricing { border-top: 1px dashed #e3e7ec; padding-top: .4rem; }
     .layer-row.is-custom .layer-note { color: #8a6100; font-weight: 600; }
     .layer-note .bi { cursor: help; }
     .needs-size { border-color: #f0ad4e !important; background: #fff8ec !important; }
@@ -72,6 +75,9 @@
     .side-panel.offcanvas-end { border-left: 0; }
     @media (min-width: 992px) { .container { padding-right: 70px; } }
     .quote-bar .btn-light { min-width: 240px; }
+    .rates-card .price-card { padding: .5rem .65rem; }
+    .rates-card .price-card .form-control { font-size: 1rem; }
+    .add-slot-bottom { border-style: dashed; border-width: 2px; }
 
     /* Text planner */
     @media (min-width: 992px) { #plannerModal .modal-dialog { max-width: min(1500px, 95vw); } }
@@ -129,7 +135,7 @@
 <!-- ===== FLOATING SIDE TABS ===== -->
 <div class="side-tabs">
   <button type="button" data-bs-toggle="offcanvas" data-bs-target="#quotePanel" title="Quote details"><i class="bi bi-shop"></i><span>Quote</span></button>
-  <button type="button" data-bs-toggle="offcanvas" data-bs-target="#pricePanel" title="Prices per m²"><i class="bi bi-tags"></i><span>Prices</span></button>
+  <button type="button" data-bs-toggle="offcanvas" data-bs-target="#pricePanel" title="Settings: unit, minimum charge, GST"><i class="bi bi-gear"></i><span>Settings</span></button>
   <button type="button" data-bs-toggle="modal" data-bs-target="#plannerModal" title="Text layout planner"><i class="bi bi-fonts"></i><span>Text</span></button>
   <button type="button" data-bs-toggle="offcanvas" data-bs-target="#historyPanel" title="Saved quotes"><i class="bi bi-clock-history"></i><span>History</span></button>
 </div>
@@ -161,6 +167,62 @@
     </div>
   </div>
 
+  <!-- ===== RATES PER M² ===== -->
+  <div class="card shadow-sm mb-4 rates-card">
+    <div class="card-body py-3">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <h6 class="mb-0"><i class="bi bi-tags me-2"></i>Rates per m² <small class="text-muted fw-normal">&mdash; edit any rate and totals update instantly</small></h6>
+        <button class="btn btn-sm btn-link text-secondary p-0" id="resetPrices"><i class="bi bi-arrow-counterclockwise"></i> Reset to defaults</button>
+      </div>
+      <div class="row g-2">
+        <div class="col-6 col-md-3">
+          <div class="price-card" style="--mat: var(--c-acm)">
+            <label class="form-label small fw-semibold mb-1" for="price-acm"><span class="dot dot-acm"></span>Aluminium Composite</label>
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control price-input" id="price-acm" data-key="acm" min="0" step="0.01">
+              <span class="input-group-text">/m²</span>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="price-card" style="--mat: var(--c-cutting)">
+            <label class="form-label small fw-semibold mb-1" for="price-cutting"><span class="dot dot-cutting"></span>ACM Cutting</label>
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control price-input" id="price-cutting" data-key="cutting" min="0" step="0.01">
+              <span class="input-group-text">/m²</span>
+            </div>
+            <div class="form-check form-switch mt-1 mb-0">
+              <input class="form-check-input" type="checkbox" id="linkCutting" checked>
+              <label class="form-check-label small text-muted" for="linkCutting">Same as composite</label>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="price-card" style="--mat: var(--c-decal)">
+            <label class="form-label small fw-semibold mb-1" for="price-decal"><span class="dot dot-decal"></span>Window Decals</label>
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control price-input" id="price-decal" data-key="decal" min="0" step="0.01">
+              <span class="input-group-text">/m²</span>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="price-card" style="--mat: var(--c-banner)">
+            <label class="form-label small fw-semibold mb-1" for="price-banner"><span class="dot dot-banner"></span>Vinyl Banners</label>
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">$</span>
+              <input type="number" class="form-control price-input" id="price-banner" data-key="banner" min="0" step="0.01">
+              <span class="input-group-text">/m²</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="row g-4">
     <!-- ===== SLOTS ===== -->
     <div class="col-lg-8">
@@ -172,6 +234,7 @@
         </div>
       </div>
       <div id="slots"></div>
+      <button class="btn btn-outline-primary w-100 py-2 add-slot-bottom" id="addSlotBottom"><i class="bi bi-plus-lg"></i> Add slot</button>
     </div>
 
     <!-- ===== SUMMARY ===== -->
@@ -350,56 +413,12 @@
 <div class="offcanvas offcanvas-end side-panel" tabindex="-1" id="pricePanel" data-bs-scroll="true" data-bs-backdrop="false">
   <div class="offcanvas-header border-bottom">
     <div>
-      <h5 class="offcanvas-title mb-0"><i class="bi bi-tags me-2"></i>Prices per m²</h5>
-      <div class="small text-muted">Change any rate &mdash; totals update instantly</div>
+      <h5 class="offcanvas-title mb-0"><i class="bi bi-gear me-2"></i>Settings</h5>
+      <div class="small text-muted">Unit, minimum charge and GST. Rates per m² are on the main page.</div>
     </div>
     <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
   </div>
   <div class="offcanvas-body">
-    <div class="row g-3">
-      <div class="col-6">
-        <div class="price-card" style="--mat: var(--c-acm)">
-          <label class="form-label small fw-semibold" for="price-acm"><span class="dot dot-acm"></span>Aluminium Composite (Alucobond)</label>
-          <div class="input-group">
-            <span class="input-group-text">$</span>
-            <input type="number" class="form-control price-input" id="price-acm" data-key="acm" min="0" step="0.01">
-          </div>
-        </div>
-      </div>
-      <div class="col-6">
-        <div class="price-card" style="--mat: var(--c-cutting)">
-          <label class="form-label small fw-semibold" for="price-cutting"><span class="dot dot-cutting"></span>ACM Cutting</label>
-          <div class="input-group">
-            <span class="input-group-text">$</span>
-            <input type="number" class="form-control price-input" id="price-cutting" data-key="cutting" min="0" step="0.01">
-          </div>
-          <div class="form-check form-switch mt-1">
-            <input class="form-check-input" type="checkbox" id="linkCutting" checked>
-            <label class="form-check-label small text-muted" for="linkCutting">Same as composite</label>
-          </div>
-        </div>
-      </div>
-      <div class="col-6">
-        <div class="price-card" style="--mat: var(--c-decal)">
-          <label class="form-label small fw-semibold" for="price-decal"><span class="dot dot-decal"></span>Window Decals</label>
-          <div class="input-group">
-            <span class="input-group-text">$</span>
-            <input type="number" class="form-control price-input" id="price-decal" data-key="decal" min="0" step="0.01">
-          </div>
-        </div>
-      </div>
-      <div class="col-6">
-        <div class="price-card" style="--mat: var(--c-banner)">
-          <label class="form-label small fw-semibold" for="price-banner"><span class="dot dot-banner"></span>Vinyl Banners</label>
-          <div class="input-group">
-            <span class="input-group-text">$</span>
-            <input type="number" class="form-control price-input" id="price-banner" data-key="banner" min="0" step="0.01">
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="small text-muted mt-1">All prices are per m².</div>
-    <hr>
     <div class="row g-3">
       <div class="col-6">
         <label class="form-label small fw-semibold" for="unit">Size unit</label>
@@ -430,7 +449,6 @@
         </div>
       </div>
     </div>
-    <button class="btn btn-sm btn-outline-secondary mt-4 w-100" id="resetPrices"><i class="bi bi-arrow-counterclockwise"></i> Reset prices to defaults</button>
   </div>
 </div>
 
@@ -490,7 +508,7 @@
       <div class="col-auto">
         <div class="layer-index bg-light border layer-num">1</div>
       </div>
-      <div class="col-12 col-md-4 col-lg">
+      <div class="col-12 col-sm layer-mat-col">
         <label class="form-label small mb-0">Material</label>
         <select class="form-select form-select-sm layer-material">
           <option value="acm">Aluminium Composite</option>
@@ -512,20 +530,24 @@
           <label class="form-check-label small">Cutting</label>
         </div>
       </div>
-      <div class="col-12 col-md text-md-end">
-        <div class="small text-muted layer-area">0.000 m²</div>
-        <div class="d-flex justify-content-md-end">
-          <div class="input-group input-group-sm" style="max-width: 160px;">
+      <div class="col-auto ms-auto">
+        <button class="btn btn-sm btn-link text-danger remove-layer" title="Remove layer"><i class="bi bi-trash"></i></button>
+      </div>
+      <div class="col-12">
+        <div class="d-flex flex-wrap justify-content-end align-items-center gap-2 layer-pricing">
+          <span class="small layer-note"></span>
+          <span class="small text-muted layer-area">0.000 m²</span>
+          <div class="input-group input-group-sm" style="width: 125px;" title="Rate per m² for this layer only. Leave empty to use the rate at the top.">
+            <input type="number" class="form-control layer-rate money" min="0" step="0.01" placeholder="0.00">
+            <span class="input-group-text">/m²</span>
+          </div>
+          <div class="input-group input-group-sm" style="width: 150px;">
             <span class="input-group-text">$</span>
             <input type="number" class="form-control layer-custom money fw-semibold" min="0" step="0.01" placeholder="0.00"
                    title="Leave empty for the calculated price, or type your own price for this layer">
-            <button class="btn btn-outline-secondary clear-custom d-none" type="button" title="Back to calculated price"><i class="bi bi-arrow-counterclockwise"></i></button>
+            <button class="btn btn-outline-secondary clear-custom d-none" type="button" title="Back to the standard rate and price"><i class="bi bi-arrow-counterclockwise"></i></button>
           </div>
         </div>
-        <div class="small layer-note"></div>
-      </div>
-      <div class="col-auto">
-        <button class="btn btn-sm btn-link text-danger remove-layer" title="Remove layer"><i class="bi bi-trash"></i></button>
       </div>
     </div>
   </div>
@@ -564,6 +586,7 @@
 
   let currentId = null;   // id of the saved quote currently loaded (null = not saved yet)
   let dirty = false;      // unsaved changes since last save/load
+  let lastMaterial = 'acm'; // material picked most recently; new slots start with it
 
   // =====================================================================
   // IndexedDB
@@ -618,6 +641,7 @@
         w: $('.layer-w', l).value,
         cut: $('.layer-cut', l).checked,
         custom: $('.layer-custom', l).value,
+        rate: $('.layer-rate', l).value,
       })),
     };
   }
@@ -655,6 +679,8 @@
     $('#gstRate').value = s.gstRate ?? 10;
     slotsEl.innerHTML = '';
     (s.slots?.length ? s.slots : [null]).forEach(sl => addSlot(sl));
+    const matEls = $('.layer-material', slotsEl);
+    if (matEls.length) lastMaterial = matEls[matEls.length - 1].value;
     if (s.planner) applyPlanner(s.planner);
     updateUnitLabels();
   }
@@ -674,12 +700,14 @@
     const layer = layerTpl.content.firstElementChild.cloneNode(true);
     const layers = $('.layers', slotEl);
     const prev = layers.lastElementChild;
-    $('.layer-material', layer).value = data.material || 'acm';
+    // Keep the material: from the copied layer, else the layer above, else the last one picked
+    $('.layer-material', layer).value = data.material || (prev ? $('.layer-material', prev).value : lastMaterial);
     // A newly stacked layer starts with the size of the layer beneath it
     $('.layer-h', layer).value = data.h ?? (prev ? $('.layer-h', prev).value : '');
     $('.layer-w', layer).value = data.w ?? (prev ? $('.layer-w', prev).value : '');
     $('.layer-cut', layer).checked = data.cut ?? true;
     $('.layer-custom', layer).value = data.custom ?? '';
+    $('.layer-rate', layer).value = data.rate ?? '';
     layers.appendChild(layer);
     updateUnitLabels(layer);
     return layer;
@@ -731,7 +759,8 @@
         const raw = (h * u) * (w * u);
         const area = raw > 0 ? Math.max(raw, minArea) : 0;
         const cut = mat === 'acm' && l.cut !== false;
-        const baseMat = area * rates[mat];
+        const ownRate = num(l.rate);                       // rate typed on this layer only
+        const baseMat = area * (ownRate || rates[mat]);
         const baseCut = cut ? area * rates.cutting : 0;
         const base = baseMat + baseCut;
 
@@ -750,7 +779,7 @@
         if (cut) { mats.cutting.area += area * qty; mats.cutting.amount += cutCost * qty; }
         return {
           mat, h, w, raw, area, minApplied: area > raw && raw > 0, cut, matCost, cutCost, price: matCost + cutCost,
-          base, isCustom,
+          base, isCustom, ownRate: ownRate > 0 && !isCustom,
           rate: area ? matCost / area : rates[mat],
           cutRate: area ? cutCost / area : rates.cutting,
           effRate: area ? (matCost + cutCost) / area : 0,
@@ -785,15 +814,18 @@
         $('.layer-h', le).classList.toggle('needs-size', !l.h);
         $('.layer-w', le).classList.toggle('needs-size', !l.w);
         $('.layer-area', le).textContent = m2(l.area) + (l.minApplied ? ' (min)' : '');
-        le.classList.toggle('is-custom', l.isCustom);
+        le.classList.toggle('is-custom', l.isCustom || l.ownRate);
         $('.layer-custom', le).placeholder = l.base.toFixed(2);
-        $('.clear-custom', le).classList.toggle('d-none', !$('.layer-custom', le).value);
+        // Rate box shows the rate in use: the top rate, or the one worked out from a typed price
+        $('.layer-rate', le).placeholder = (l.isCustom ? l.rate : m.rates[l.mat]).toFixed(2);
+        $('.clear-custom', le).classList.toggle('d-none', !$('.layer-custom', le).value && !$('.layer-rate', le).value);
 
         // Rate per m² shown under the price box; a tick marks an updated (custom) price
         const note = $('.layer-note', le);
-        note.innerHTML = !l.area ? '' : l.isCustom
-          ? `${money(l.effRate)}/m² <i class="bi bi-check-circle-fill text-success" title="Updated price (calculated ${money(l.base)} at ${money(l.base / l.area)}/m²)"></i>`
-          : `${money(l.effRate)}/m²`;
+        note.innerHTML = !l.area ? ''
+          : l.isCustom ? `Your price <i class="bi bi-check-circle-fill text-success" title="Updated price: ${money(l.effRate)}/m² (standard ${money(m.rates[l.mat])}/m²)"></i>`
+          : l.ownRate ? `Own rate <i class="bi bi-check-circle-fill text-success" title="This layer uses ${money(l.rate)}/m² instead of the standard ${money(m.rates[l.mat])}/m²"></i>`
+          : '';
       });
       $('.slot-area', slotEl).textContent = m2(s.unitArea) + (s.qty > 1 ? ` × ${s.qty} = ${m2(s.unitArea * s.qty)}` : '');
       $('.slot-total', slotEl).textContent = s.qty > 1 ? `${s.qty} × ${money(s.unitPrice)} = ${money(s.total)}` : money(s.total);
@@ -849,10 +881,10 @@
         const size = `${l.h} × ${l.w} ${u}`;
         const areaCell = m2(l.area) + (l.minApplied ? ' <small>(min)</small>' : '');
         rows.push(`<tr class="sub-item">
-          <td>${MATERIAL_NAMES[l.mat]}${l.isCustom ? ' *' : ''}</td><td class="num">${size}</td><td class="num">${areaCell}</td>
+          <td>${MATERIAL_NAMES[l.mat]}${l.isCustom || l.ownRate ? ' *' : ''}</td><td class="num">${size}</td><td class="num">${areaCell}</td>
           <td class="num">${s.qty}</td><td class="num">${m2(l.area * s.qty)}</td>
           <td class="num">${money(l.rate)}</td><td class="num">${money(l.matCost * s.qty)}</td></tr>`);
-        if (l.isCustom) anyCustom = true;
+        if (l.isCustom || l.ownRate) anyCustom = true;
         if (l.cut) {
           rows.push(`<tr class="sub-item">
             <td>&nbsp;&nbsp;↳ ACM Cutting</td><td class="num">${size}</td><td class="num">${areaCell}</td>
@@ -903,7 +935,7 @@
           <tr class="grand"><td colspan="3">TOTAL${m.gstOn ? ' (inc. GST)' : ''}</td><td class="num">${money(m.total)}</td></tr>
         </tbody>
       </table>
-      <p style="color:#555">${anyCustom ? '* Custom price for this item; rate shown is the effective rate per m². Material summary rates are averages. ' : ''}Sizes in ${u}. Areas in square metres. Cutting is charged on the area of each Aluminium Composite panel.</p>`;
+      <p style="color:#555">${anyCustom ? '* Custom price or rate for this item; rate shown is the rate used per m². Material summary rates are averages. ' : ''}Sizes in ${u}. Areas in square metres. Cutting is charged on the area of each Aluminium Composite panel.</p>`;
   }
 
   let printOverride = null;
@@ -1448,6 +1480,7 @@
     if (e.target.closest('#planner')) { renderPlanner(); saveDraft(readState()); return; }
     if (e.target.id === 'unit') renderPlanner();
     if (e.target === storeInput) storeInput.classList.remove('is-invalid');
+    if (e.target.classList.contains('layer-material')) lastMaterial = e.target.value;
     if (e.target.id === 'unit') updateUnitLabels();
     if (e.target === acmInput || e.target === linkCutting) syncCutting();
     dirty = true;
@@ -1470,6 +1503,7 @@
     }
     else if (btn.classList.contains('clear-custom')) {
       $('.layer-custom', btn.closest('.layer-row')).value = '';
+      $('.layer-rate', btn.closest('.layer-row')).value = '';
     }
     else if (btn.classList.contains('remove-slot')) slot.remove();
     else if (btn.classList.contains('dup-slot')) slot.after(addSlot(readSlot(slot)));
@@ -1479,12 +1513,15 @@
     calculate();
   });
 
-  $('#addSlot').addEventListener('click', () => {
+  function addSlotAndFocus() {
     const s = addSlot();
     dirty = true;
     calculate();
-    $('.layer-h', s).focus();
-  });
+    s.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('.layer-h', s).focus({ preventScroll: true });
+  }
+  $('#addSlot').addEventListener('click', addSlotAndFocus);
+  $('#addSlotBottom').addEventListener('click', addSlotAndFocus);
 
   $('#resetPrices').addEventListener('click', () => {
     linkCutting.checked = true;
