@@ -84,6 +84,13 @@
     .total-hero .amount { font-size: 2.1rem; font-weight: 800; line-height: 1.1; }
     .total-hero .label { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--c-on-accent-soft); }
     .total-hero .area { font-size: .875rem; color: var(--c-on-accent-soft); }
+    #heroTotal { cursor: pointer; border-radius: .4rem; }
+    #heroTotal:hover { background: rgba(255,255,255,.08); }
+    #heroTotal:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    #heroTotalInput { font-size: 1.6rem; }
+    .total-hero .adjust-line { font-size: .8rem; background: rgba(255,255,255,.14); border-radius: .4rem; padding: .15rem .5rem; margin: .25rem 0; }
+    .total-hero .adjust-line .btn-link { color: #fff; font-size: .8rem; }
+    .total-hero .edit-hint { font-size: .7rem; color: var(--c-on-accent-soft); opacity: .8; margin-top: .15rem; }
     .money { font-variant-numeric: tabular-nums; }
     .history-item .btn { padding: .25rem .6rem; }
     .kbd-hint { font-size: .75rem; color: #6c757d; }
@@ -292,8 +299,16 @@
         <div class="card-body">
           <div class="total-hero mb-3">
             <div class="label" id="heroLabel">Total (inc. GST)</div>
-            <div class="amount money" id="heroTotal" aria-live="polite" aria-atomic="true">$0.00</div>
+            <div class="amount money" id="heroTotal" aria-live="polite" aria-atomic="true" tabindex="0" role="button"
+                 title="Double-click to type a final price" aria-label="Total. Double-click or press Enter to type a final price">$0.00</div>
+            <input type="number" class="form-control form-control-lg text-center money fw-bold d-none" id="heroTotalInput"
+                   min="0" step="0.01" aria-label="Final price for the whole quote">
+            <div class="adjust-line d-none" id="heroAdjust">
+              <span id="heroAdjustText"></span>
+              <button type="button" class="btn btn-sm btn-link p-0 ms-1 align-baseline" id="clearFinal">Reset</button>
+            </div>
             <div class="area" id="heroArea">0.000 m² of material</div>
+            <div class="edit-hint" id="heroHint">Double-click the total to set a final price</div>
           </div>
           <div id="summaryLines" class="small mb-3 summary-lines"></div>
           <table class="table table-sm mb-0">
@@ -650,6 +665,7 @@
   let dirty = false;      // unsaved changes since last save/load
   let layerSeq = 0;         // gives each cloned layer's inputs unique ids
   let lastMaterial = 'acm'; // material picked most recently; new slots start with it
+  let finalTotal = '';      // final price typed over the total ('' = use the calculated total)
 
   // =====================================================================
   // IndexedDB
@@ -723,6 +739,7 @@
       minArea: $('#minArea').value,
       gst: $('#gstToggle').checked,
       gstRate: $('#gstRate').value,
+      finalTotal,
       slots: $$('.slot-card', slotsEl).map(readSlot),
       planner: readPlanner(),
     };
@@ -741,6 +758,7 @@
     $('#minArea').value = s.minArea ?? 0;
     $('#gstToggle').checked = s.gst ?? true;
     $('#gstRate').value = s.gstRate ?? 10;
+    finalTotal = s.finalTotal || '';
     slotsEl.innerHTML = '';
     (s.slots?.length ? s.slots : [null]).forEach(sl => addSlot(sl));
     const matEls = $$('.layer-material', slotsEl);
@@ -848,27 +866,56 @@
           else { matCost = customVal; cutCost = 0; }
         }
 
-        mats[mat].area += area * n;
-        mats[mat].amount += matCost * n;
-        if (cut) { mats.cutting.area += area * n; mats.cutting.amount += cutCost * n; }
         return {
-          mat, h, w, qty: lq, raw, area, minApplied: area > raw && raw > 0, cut, matCost, cutCost, price: matCost + cutCost,
-          base, isCustom, ownRate: ownRate > 0 && !isCustom,
-          rate: area ? matCost / area : rates[mat],
-          cutRate: area ? cutCost / area : rates.cutting,
-          effRate: area ? (matCost + cutCost) / area : 0,
+          mat, h, w, qty: lq, n, raw, area, minApplied: area > raw && raw > 0, cut, matCost, cutCost,
+          base, isCustom, ownRate: ownRate > 0 && !isCustom, adjusted: false,
         };
       });
-      const unitArea = layers.reduce((a, l) => a + l.area * l.qty, 0);
-      const unitPrice = layers.reduce((a, l) => a + l.price * l.qty, 0);
-      return { name: (s.name || '').trim() || `Slot ${i + 1}`, qty, layers, unitArea, unitPrice, total: unitPrice * qty };
+      return { name: (s.name || '').trim() || `Slot ${i + 1}`, qty, layers };
+    });
+    const allLayers = slots.flatMap(s => s.layers);
+    const gstRate = st.gst ? num(st.gstRate) : 0;
+
+    // Final price typed over the total: work backwards to the rates.
+    // Every item is scaled by the same factor so relative prices stay fair.
+    // Items with their own typed price/rate stay fixed, unless they alone already exceed the final price.
+    const stdSubtotal = allLayers.reduce((a, l) => a + (l.matCost + l.cutCost) * l.n, 0);
+    const finalTotal = num(st.finalTotal);
+    let adjust = null;
+    if (finalTotal > 0 && stdSubtotal > 0) {
+      const targetSub = finalTotal / (1 + gstRate / 100);
+      const locked = (l) => l.isCustom || l.ownRate;
+      const lockedAmt = allLayers.filter(locked).reduce((a, l) => a + (l.matCost + l.cutCost) * l.n, 0);
+      const freeAmt = stdSubtotal - lockedAmt;
+      const keepLocked = freeAmt > 0 && targetSub - lockedAmt > 0;
+      const factor = keepLocked ? (targetSub - lockedAmt) / freeAmt : targetSub / stdSubtotal;
+      allLayers.forEach(l => {
+        if (keepLocked && locked(l)) return;
+        l.stdRate = l.area ? l.matCost / l.area : 0;   // rate before the final-price adjustment
+        l.matCost *= factor; l.cutCost *= factor; l.adjusted = true;
+      });
+      adjust = { finalTotal, stdTotal: stdSubtotal * (1 + gstRate / 100), change: targetSub / stdSubtotal - 1, lockedScaled: !keepLocked && lockedAmt > 0 };
+    }
+
+    allLayers.forEach(l => {
+      l.price = l.matCost + l.cutCost;
+      l.rate = l.area ? l.matCost / l.area : rates[l.mat];
+      l.cutRate = l.area ? l.cutCost / l.area : rates.cutting;
+      l.effRate = l.area ? l.price / l.area : 0;
+      mats[l.mat].area += l.area * l.n;
+      mats[l.mat].amount += l.matCost * l.n;
+      if (l.cut) { mats.cutting.area += l.area * l.n; mats.cutting.amount += l.cutCost * l.n; }
+    });
+    slots.forEach(s => {
+      s.unitArea = s.layers.reduce((a, l) => a + l.area * l.qty, 0);
+      s.unitPrice = s.layers.reduce((a, l) => a + l.price * l.qty, 0);
+      s.total = s.unitPrice * s.qty;
     });
 
     const subtotal = MATERIAL_ORDER.reduce((a, k) => a + mats[k].amount, 0);
-    const gstRate = st.gst ? num(st.gstRate) : 0;
     const gst = subtotal * gstRate / 100;
     const totalArea = mats.acm.area + mats.decal.area + mats.banner.area;
-    return { rates, unit: st.unit || 'mm', slots, mats, subtotal, gstOn: !!st.gst, gstRate, gst, total: subtotal + gst, totalArea };
+    return { rates, unit: st.unit || 'mm', slots, mats, subtotal, gstOn: !!st.gst, gstRate, gst, total: subtotal + gst, totalArea, adjust };
   }
 
   // =====================================================================
@@ -889,16 +936,18 @@
         $('.layer-w', le).classList.toggle('needs-size', !l.w);
         $('.layer-area', le).textContent = m2(l.area) + (l.minApplied ? ' (min)' : '')
           + (l.qty > 1 && l.area ? ` × ${l.qty} = ${m2(l.area * l.qty)} · ${l.qty} × ${money(l.price)} = ${money(l.price * l.qty)}` : '');
-        le.classList.toggle('is-custom', l.isCustom || l.ownRate);
-        $('.layer-custom', le).placeholder = l.base.toFixed(2);
+        le.classList.toggle('is-custom', l.isCustom || l.ownRate || l.adjusted);
+        $('.layer-custom', le).placeholder = (l.isCustom ? l.base : l.price).toFixed(2);
         $('.layer-custom', le).setAttribute('aria-label', l.qty > 1 ? 'Price for each piece of this layer (leave empty for the calculated price)' : 'Price for this layer (leave empty for the calculated price)');
         // Rate box shows the rate in use: the top rate, or the one worked out from a typed price
-        $('.layer-rate', le).placeholder = (l.isCustom ? l.rate : m.rates[l.mat]).toFixed(2);
+        $('.layer-rate', le).placeholder = (l.isCustom || l.adjusted ? l.rate : m.rates[l.mat]).toFixed(2);
         $('.clear-custom', le).classList.toggle('d-none', !$('.layer-custom', le).value && !$('.layer-rate', le).value);
 
         // Rate per m² shown under the price box; a tick marks an updated (custom) price
         const note = $('.layer-note', le);
+        const tick = '<i class="bi bi-check-circle-fill text-success" aria-hidden="true"></i>';
         note.innerHTML = !l.area ? ''
+          : l.adjusted ? `${tick} From final price: ${money(l.rate)}/m²${l.cut ? ` + cutting ${money(l.cutRate)}/m²` : ''} <span class="fw-normal">(was ${money(l.stdRate)})</span>`
           : l.isCustom ? `<i class="bi bi-check-circle-fill text-success" aria-hidden="true"></i> Your price: ${money(l.effRate)}/m² <span class="fw-normal">(std ${money(m.rates[l.mat])})</span>`
           : l.ownRate ? `<i class="bi bi-check-circle-fill text-success" aria-hidden="true"></i> Own rate: ${money(l.rate)}/m² <span class="fw-normal">(std ${money(m.rates[l.mat])})</span>`
           : '';
@@ -928,6 +977,13 @@
     $('#navTotal').textContent = money(m.total);
     $('#heroLabel').textContent = m.gstOn ? `Total (inc. ${m.gstRate}% GST)` : 'Total (ex. GST)';
     $('#heroArea').textContent = `${m2(m.totalArea)} of material`;
+    const a = m.adjust;
+    $('#heroAdjust').classList.toggle('d-none', !finalTotal);
+    $('#heroHint').classList.toggle('d-none', !!finalTotal);
+    $('#heroAdjustText').textContent = !finalTotal ? ''
+      : !a ? 'Final price set — add item sizes to apply it'
+      : `Final price · calculated ${money(a.stdTotal)} (${a.change >= 0 ? '+' : '−'}${Math.abs(a.change * 100).toFixed(1)}%)`
+        + (a.lockedScaled ? ' · fixed-price items scaled too' : '');
 
     updateSaveStatus();
     saveDraft(st);
@@ -1552,7 +1608,7 @@
   // Events
   // =====================================================================
   function onEdit(e) {
-    if (e.target.closest('#historyPanel')) return;
+    if (e.target.closest('#historyPanel') || e.target.id === 'heroTotalInput') return;
     if (e.target.closest('#planner')) { renderPlanner(); saveDraft(readState()); return; }
     if (e.target.id === 'unit') renderPlanner();
     if (e.target === storeInput) storeInput.classList.remove('is-invalid');
@@ -1607,7 +1663,42 @@
     calculate();
   });
 
+  // ----- Final price: double-click the total, type the price, rates are worked out backwards -----
+  const heroTotal = $('#heroTotal');
+  const heroInput = $('#heroTotalInput');
+  function editFinal() {
+    const shown = compute(readState()).total;
+    heroInput.value = finalTotal || (shown ? shown.toFixed(2) : '');
+    heroTotal.classList.add('d-none');
+    heroInput.classList.remove('d-none');
+    heroInput.focus();
+    heroInput.select();
+  }
+  function closeFinal(apply) {
+    if (heroInput.classList.contains('d-none')) return;
+    heroInput.classList.add('d-none');
+    heroTotal.classList.remove('d-none');
+    if (apply) {
+      const v = num(heroInput.value);
+      // Typing back the calculated total (or nothing) means "no final price"
+      const calc = compute({ ...readState(), finalTotal: '' }).total;
+      const next = v && Math.abs(v - calc) >= 0.005 ? v.toFixed(2) : '';
+      if (next !== finalTotal) { finalTotal = next; dirty = true; }
+      calculate();
+    }
+    heroTotal.focus();
+  }
+  heroTotal.addEventListener('dblclick', editFinal);
+  heroTotal.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); editFinal(); } });
+  heroInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); closeFinal(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeFinal(false); }
+  });
+  heroInput.addEventListener('blur', () => closeFinal(true));
+  $('#clearFinal').addEventListener('click', () => { finalTotal = ''; dirty = true; calculate(); });
+
   $('#clearAll').addEventListener('click', () => {
+    finalTotal = '';
     slotsEl.innerHTML = '';
     addSlot();
     dirty = true;
