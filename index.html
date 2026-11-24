@@ -65,6 +65,8 @@
     .layer-row.is-custom .layer-custom:not(:placeholder-shown), .layer-row.is-custom .layer-rate:not(:placeholder-shown) { background: var(--custom-field); border-color: var(--custom-field-line); }
     .layer-note { color: #6c757d; font-size: .75rem; }
     .layer-mat-col { min-width: 170px; }
+    .layer-qty-col { min-width: 70px; }
+    .layer-qty { text-align: center; }
     .layer-pricing { border-top: 1px dashed var(--line); padding-top: .4rem; }
     .layer-row.is-custom .layer-note { color: var(--custom-ink); font-weight: 600; }
     .needs-size { border-color: #f0ad4e !important; background: #fff8ec !important; }
@@ -530,8 +532,8 @@
       <span class="badge text-bg-dark slot-number">Slot 1</span>
       <input type="text" class="form-control form-control-sm slot-name" placeholder="Slot name / description" aria-label="Slot name or description">
       <div class="input-group input-group-sm ms-auto" style="width: 130px;">
-        <span class="input-group-text">Qty</span>
-        <input type="number" class="form-control slot-qty" min="1" step="1" value="1" aria-label="Quantity">
+        <span class="input-group-text" title="Repeats the whole slot (all layers) this many times">Sets</span>
+        <input type="number" class="form-control slot-qty" min="1" step="1" value="1" aria-label="Number of sets of this slot" title="Repeats the whole slot (all layers) this many times">
       </div>
       <button class="btn btn-sm btn-outline-secondary dup-slot" title="Duplicate slot" aria-label="Duplicate slot"><i class="bi bi-files"></i></button>
       <button class="btn btn-sm btn-outline-danger remove-slot" title="Remove slot" aria-label="Remove slot"><i class="bi bi-x-lg"></i></button>
@@ -542,7 +544,7 @@
       <button class="btn btn-sm btn-outline-primary add-layer mt-1"><i class="bi bi-plus"></i> Stack another layer</button>
     </div>
     <div class="card-footer bg-light d-flex justify-content-between small">
-      <span>Area per unit: <strong class="slot-area">0.000 m²</strong></span>
+      <span>Area per set: <strong class="slot-area">0.000 m²</strong></span>
       <span>Slot total: <strong class="slot-total money fs-6">$0.00</strong></span>
     </div>
   </div>
@@ -562,13 +564,18 @@
           <option value="banner">Vinyl Banners</option>
         </select>
       </div>
-      <div class="col-6 col-md-2 order-1 order-md-0">
+      <div class="col-4 col-md-2 order-1 order-md-0">
         <label class="form-label small mb-0" data-for="layer-h">Height <span class="unit-label">mm</span></label>
         <input type="number" class="form-control form-control-sm layer-h" min="0" step="any" placeholder="0">
       </div>
-      <div class="col-6 col-md-2 order-1 order-md-0">
+      <div class="col-4 col-md-2 order-1 order-md-0">
         <label class="form-label small mb-0" data-for="layer-w">Width <span class="unit-label">mm</span></label>
         <input type="number" class="form-control form-control-sm layer-w" min="0" step="any" placeholder="0">
+      </div>
+      <div class="col-4 col-md-1 order-1 order-md-0 layer-qty-col">
+        <label class="form-label small mb-0" data-for="layer-qty">Qty</label>
+        <input type="number" class="form-control form-control-sm layer-qty" min="1" step="1" value="1"
+               title="How many pieces of this size (e.g. 2 identical panels)">
       </div>
       <div class="col-auto acm-only order-1 order-md-0">
         <div class="form-check mb-1">
@@ -695,6 +702,7 @@
         material: $('.layer-material', l).value,
         h: $('.layer-h', l).value,
         w: $('.layer-w', l).value,
+        qty: $('.layer-qty', l).value,
         cut: $('.layer-cut', l).checked,
         custom: $('.layer-custom', l).value,
         rate: $('.layer-rate', l).value,
@@ -761,6 +769,7 @@
     // A newly stacked layer starts with the size of the layer beneath it
     $('.layer-h', layer).value = data.h ?? (prev ? $('.layer-h', prev).value : '');
     $('.layer-w', layer).value = data.w ?? (prev ? $('.layer-w', prev).value : '');
+    $('.layer-qty', layer).value = data.qty || (prev ? $('.layer-qty', prev).value : 1) || 1;
     $('.layer-cut', layer).checked = data.cut ?? true;
     $('.layer-custom', layer).value = data.custom ?? '';
     $('.layer-rate', layer).value = data.rate ?? '';
@@ -819,6 +828,8 @@
       const layers = (s.layers || []).map(l => {
         const mat = ['acm', 'decal', 'banner'].includes(l.material) ? l.material : 'acm';
         const h = num(l.h), w = num(l.w);
+        const lq = Math.max(1, Math.floor(num(l.qty)) || 1);   // identical pieces of this layer
+        const n = lq * qty;                                    // pieces in the whole quote
         const raw = (h * u) * (w * u);
         const area = raw > 0 ? Math.max(raw, minArea) : 0;
         const cut = mat === 'acm' && l.cut !== false;
@@ -837,19 +848,19 @@
           else { matCost = customVal; cutCost = 0; }
         }
 
-        mats[mat].area += area * qty;
-        mats[mat].amount += matCost * qty;
-        if (cut) { mats.cutting.area += area * qty; mats.cutting.amount += cutCost * qty; }
+        mats[mat].area += area * n;
+        mats[mat].amount += matCost * n;
+        if (cut) { mats.cutting.area += area * n; mats.cutting.amount += cutCost * n; }
         return {
-          mat, h, w, raw, area, minApplied: area > raw && raw > 0, cut, matCost, cutCost, price: matCost + cutCost,
+          mat, h, w, qty: lq, raw, area, minApplied: area > raw && raw > 0, cut, matCost, cutCost, price: matCost + cutCost,
           base, isCustom, ownRate: ownRate > 0 && !isCustom,
           rate: area ? matCost / area : rates[mat],
           cutRate: area ? cutCost / area : rates.cutting,
           effRate: area ? (matCost + cutCost) / area : 0,
         };
       });
-      const unitArea = layers.reduce((a, l) => a + l.area, 0);
-      const unitPrice = layers.reduce((a, l) => a + l.price, 0);
+      const unitArea = layers.reduce((a, l) => a + l.area * l.qty, 0);
+      const unitPrice = layers.reduce((a, l) => a + l.price * l.qty, 0);
       return { name: (s.name || '').trim() || `Slot ${i + 1}`, qty, layers, unitArea, unitPrice, total: unitPrice * qty };
     });
 
@@ -876,9 +887,11 @@
         // Highlight empty size boxes so nothing gets missed
         $('.layer-h', le).classList.toggle('needs-size', !l.h);
         $('.layer-w', le).classList.toggle('needs-size', !l.w);
-        $('.layer-area', le).textContent = m2(l.area) + (l.minApplied ? ' (min)' : '');
+        $('.layer-area', le).textContent = m2(l.area) + (l.minApplied ? ' (min)' : '')
+          + (l.qty > 1 && l.area ? ` × ${l.qty} = ${m2(l.area * l.qty)} · ${l.qty} × ${money(l.price)} = ${money(l.price * l.qty)}` : '');
         le.classList.toggle('is-custom', l.isCustom || l.ownRate);
         $('.layer-custom', le).placeholder = l.base.toFixed(2);
+        $('.layer-custom', le).setAttribute('aria-label', l.qty > 1 ? 'Price for each piece of this layer (leave empty for the calculated price)' : 'Price for this layer (leave empty for the calculated price)');
         // Rate box shows the rate in use: the top rate, or the one worked out from a typed price
         $('.layer-rate', le).placeholder = (l.isCustom ? l.rate : m.rates[l.mat]).toFixed(2);
         $('.clear-custom', le).classList.toggle('d-none', !$('.layer-custom', le).value && !$('.layer-rate', le).value);
@@ -939,23 +952,23 @@
     m.slots.forEach((s, i) => {
       const layers = s.layers.filter(l => l.area > 0);
       if (!layers.length) return;
-      rows.push(`<tr class="slot-head"><td colspan="7">${i + 1}. ${esc(s.name)} &mdash; Qty ${s.qty}</td></tr>`);
+      rows.push(`<tr class="slot-head"><td colspan="7">${i + 1}. ${esc(s.name)}${s.qty > 1 ? ` &mdash; ${s.qty} sets` : ''}</td></tr>`);
       layers.forEach(l => {
         const size = `${l.h} × ${l.w} ${u}`;
         const areaCell = m2(l.area) + (l.minApplied ? ' <small>(min)</small>' : '');
         rows.push(`<tr class="sub-item">
           <td>${MATERIAL_NAMES[l.mat]}${l.isCustom || l.ownRate ? ' *' : ''}</td><td class="num">${size}</td><td class="num">${areaCell}</td>
-          <td class="num">${s.qty}</td><td class="num">${m2(l.area * s.qty)}</td>
-          <td class="num">${money(l.rate)}</td><td class="num">${money(l.matCost * s.qty)}</td></tr>`);
+          <td class="num">${l.qty * s.qty}</td><td class="num">${m2(l.area * l.qty * s.qty)}</td>
+          <td class="num">${money(l.rate)}</td><td class="num">${money(l.matCost * l.qty * s.qty)}</td></tr>`);
         if (l.isCustom || l.ownRate) anyCustom = true;
         if (l.cut) {
           rows.push(`<tr class="sub-item">
             <td>&nbsp;&nbsp;↳ ACM Cutting</td><td class="num">${size}</td><td class="num">${areaCell}</td>
-            <td class="num">${s.qty}</td><td class="num">${m2(l.area * s.qty)}</td>
-            <td class="num">${money(l.cutRate)}</td><td class="num">${money(l.cutCost * s.qty)}</td></tr>`);
+            <td class="num">${l.qty * s.qty}</td><td class="num">${m2(l.area * l.qty * s.qty)}</td>
+            <td class="num">${money(l.cutRate)}</td><td class="num">${money(l.cutCost * l.qty * s.qty)}</td></tr>`);
         }
       });
-      rows.push(`<tr class="slot-sub"><td colspan="4" style="text-align:right">Slot total (${s.qty} × ${money(s.unitPrice)})</td>
+      rows.push(`<tr class="slot-sub"><td colspan="4" style="text-align:right">Slot total${s.qty > 1 ? ` (${s.qty} sets × ${money(s.unitPrice)})` : ''}</td>
         <td class="num">${m2(s.unitArea * s.qty)}</td><td></td><td class="num">${money(s.total)}</td></tr>`);
     });
 
